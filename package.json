@@ -1,0 +1,13 @@
+{
+  "name": "speakpilot",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "uvicorn backend.app:app --host 0.0.0.0 --port 5173",
+    "start": "uvicorn backend.app:app --host 0.0.0.0 --port 5173",
+    "check": "python3 -m py_compile backend/app.py && node --check public/app.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
