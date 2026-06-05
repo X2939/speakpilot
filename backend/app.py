@@ -342,10 +342,7 @@ def create_mock_turn(
 ) -> dict[str, Any]:
     feedback = make_feedback(user_text, voice_confidence, used_voice)
     reply = build_fallback_reply(user_text, scenario)
-    level_hint = {
-        "beginner": "Use one or two simple sentences.",
-        "advanced": "Try to add a reason and one specific detail.",
-    }.get(level, "Try to answer with a complete sentence and one detail.")
+    level_hint = build_level_hint(user_text, level)
 
     return {
         "reply": f"{reply} {level_hint}",
@@ -356,16 +353,31 @@ def create_mock_turn(
 
 def build_fallback_reply(user_text: str, scenario: dict[str, str]) -> str:
     words = [word for word in user_text.split() if word]
-    if len(words) < 4:
-        return "I need a little more information. Could you answer with a full sentence?"
-
     lower = user_text.lower()
     role = scenario["role"]
+
+    if is_unclear_input(user_text):
+        return "I caught part of your answer, but some words were unclear. Could you say it again more slowly?"
+
+    if role == "interviewer" and is_refusal(user_text):
+        if any(word in lower for word in ["introduce", "selfintroduce", "slefintroduce"]):
+            return "That's okay. You can skip a full self-introduction. Please start with one strength or one recent project."
+        return "That's okay. Could you tell me what you would prefer to talk about, your project or your strength?"
+
+    if len(words) < 4:
+        if role == "interviewer":
+            return "I need a little more information. You can answer with one strength, one project, or one reason."
+        return "I need a little more information. Could you answer with a full sentence?"
+
     if role == "interviewer":
         if any(word in lower for word in ["introduce", "selfintroduce", "slefintroduce"]):
             return "No problem. Instead of a long self-introduction, could you share one strength and one example?"
         if any(word in lower for word in ["project", "study", "work", "internship"]):
-            return "That sounds relevant. What was your specific responsibility in that experience?"
+            return "That sounds relevant. What was your specific responsibility, and what result did you achieve?"
+        if any(word in lower for word in ["strength", "advantage", "good at", "skill"]):
+            return "Good. Could you connect that strength with one project or learning experience?"
+        if any(word in lower for word in ["student", "major", "school", "university"]):
+            return "Nice start. Could you add one strength and one project experience to make your introduction stronger?"
         if any(word in lower for word in ["agree", "plan", "idea"]):
             return "Good. Why do you think this plan is better than the other options?"
         return "Thanks. Could you give me one concrete example to support your answer?"
@@ -378,6 +390,46 @@ def build_fallback_reply(user_text: str, scenario: dict[str, str]) -> str:
     if role == "classmate":
         return "That makes sense. Do you want to study together or split the task first?"
     return "Thanks. Please add one more detail so we can continue the conversation."
+
+
+def build_level_hint(user_text: str, level: str) -> str:
+    if is_unclear_input(user_text):
+        return "Use this pattern: 'I'm a student, and one strength is ...'."
+    if len([word for word in user_text.split() if word]) < 5 or is_refusal(user_text):
+        return "You can use: 'I think ... because ...' or 'One example is ...'."
+    if level == "beginner":
+        return "Use one or two simple sentences."
+    if level == "advanced":
+        return "Try to add a reason, a specific detail, and a result."
+    return "Try to answer with a complete sentence and one detail."
+
+
+def is_refusal(text: str) -> bool:
+    lower = text.lower().strip()
+    return bool(
+        re.fullmatch(r"(no|nope|nah|not really)[.!?]*", lower)
+        or re.search(r"\b(i\s+)?(do not|don't|dont|don t)\s+want\b", lower)
+        or re.search(r"\b(i\s+)?(cannot|can't|cant)\s+(answer|say|tell|introduce)\b", lower)
+    )
+
+
+def is_unclear_input(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.lower())
+    words = [word for word in re.findall(r"[a-zA-Z]+", text.lower()) if word]
+    if not compact:
+        return False
+    if re.search(r"([a-zA-Z])\1{6,}", text):
+        return True
+    if re.search(r"([a-zA-Z]{2,})\1{3,}", compact):
+        return True
+    long_words = [word for word in words if len(word) >= 14]
+    if long_words and not any(word in long_words[0] for word in ["introduction", "responsibility"]):
+        return True
+    if len(compact) >= 18:
+        unique_ratio = len(set(compact)) / len(compact)
+        if unique_ratio < 0.28:
+            return True
+    return False
 
 
 def create_mock_summary(
@@ -514,6 +566,15 @@ def make_feedback(text: str, voice_confidence: float | None = None, used_voice: 
                 "reason": "需要先说出一句完整英文，系统才能继续评估。",
             }
         )
+    if is_unclear_input(text):
+        issues.append(
+            {
+                "type": "clarity",
+                "original": text[:80],
+                "suggestion": "Please say it again more slowly with clear word boundaries.",
+                "reason": "输入中存在大量重复字符或不清晰片段，真实口语练习中应优先保证关键词能被听清。",
+            }
+        )
     if re.search(r"\bi am agree\b", lower):
         issues.append(
             {
@@ -568,24 +629,35 @@ def make_feedback(text: str, voice_confidence: float | None = None, used_voice: 
                 "reason": "第三人称单数的一般现在时动词需要加 s。",
             }
         )
+    if is_refusal(text):
+        issues.append(
+            {
+                "type": "expression",
+                "original": text,
+                "suggestion": "Try: I prefer to talk about my project because ...",
+                "reason": "拒绝回答时也要给出替代方向，这样对话才能继续推进。",
+            }
+        )
     if len([word for word in text.split() if word]) < 5:
         issues.append(
             {
                 "type": "fluency",
                 "original": text,
-                "suggestion": "Add one reason or detail to make your answer clearer.",
-                "reason": "回答偏短，真实对话中需要补充原因或细节。",
+                "suggestion": "Use: I think ... because ... / One example is ...",
+                "reason": "回答偏短，真实对话中需要补充原因或细节；可以直接套用句式继续说。",
             }
         )
 
-    score = max(58, 88 - len(issues) * 8 + min(8, len(text) // 28))
+    clarity_penalty = 14 if is_unclear_input(text) else 0
+    refusal_penalty = 6 if is_refusal(text) else 0
+    score = max(45, 88 - len(issues) * 8 - clarity_penalty - refusal_penalty + min(8, len(text) // 28))
     grammar_count = len([issue for issue in issues if issue["type"] == "grammar"])
     pronunciation = estimate_pronunciation_score(text, voice_confidence, used_voice)
     return {
         "score": score,
-        "fluency": max(55, score - (8 if len(text) < 35 else 0)),
+        "fluency": max(45, score - (12 if is_unclear_input(text) else 8 if len(text) < 35 else 0)),
         "accuracy": max(55, score - grammar_count * 6),
-        "vocabulary": max(58, score - 3),
+        "vocabulary": max(45, score - (8 if is_unclear_input(text) else 3)),
         "pronunciation": pronunciation,
         "issues": issues[:3],
         "betterExpression": (
@@ -613,6 +685,10 @@ def estimate_pronunciation_score(text: str, voice_confidence: float | None, used
 def improve_sentence(text: str) -> str:
     if not text.strip():
         return "I would like to answer with a complete sentence."
+    if is_unclear_input(text):
+        return "I'm a student, and one strength is that I learn quickly."
+    if is_refusal(text):
+        return "I prefer to talk about my project because it shows my skills."
     replacements = [
         (r"\bI am agree\b", "I agree"),
         (r"\bi dont\b", "I don't"),

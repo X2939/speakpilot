@@ -47,7 +47,7 @@ http://localhost:5173
 输入：
 
 ```text
-yes,but i dont want to slefintroduce
+I dont want to introduce myself, but I can talk about my AI speaking coach project.
 ```
 
 讲解：
@@ -57,8 +57,8 @@ yes,but i dont want to slefintroduce
 展示重点：
 
 - `i dont` -> `I don't`
-- `slefintroduce` -> `introduce myself`
-- `yes,but` -> `yes, but`
+- 拒绝自我介绍时，引导用户改从项目或优势切入
+- 短回答时，给出 `I think ... because ...` 或 `One example is ...` 句式
 - 总分、流利度、准确性、词汇、发音清晰度评分
 
 ### 4. 展示跟读发音评测
