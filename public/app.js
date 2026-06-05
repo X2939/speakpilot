@@ -55,6 +55,9 @@ const state = {
   usedVoiceForTurn: false,
   voiceConfidence: null,
   finalTranscript: "",
+  pronunciationMode: false,
+  pronunciationTarget: "",
+  pronunciationResult: null,
   speaking: true,
 };
 
@@ -170,9 +173,13 @@ function render() {
                 <span class="voice-dot ${state.recognizing ? "listening" : ""}"></span>
                 <span>${escapeHtml(getVoiceStatusText())}</span>
               </div>
+              ${renderPronunciationPanel()}
               <div class="composer-actions">
                 <button class="mic ${state.voiceIntent ? "recording" : ""}" data-action="voice">
                   ${state.voiceIntent ? "停止识别" : "连续语音输入"}
+                </button>
+                <button class="secondary" data-action="pronunciation">
+                  ${state.pronunciationMode ? "完成评测" : "跟读评测"}
                 </button>
                 <button class="primary" data-action="send" ${state.status === "thinking" ? "disabled" : ""}>
                   ${state.status === "thinking" ? "AI 思考中" : "发送"}
@@ -255,6 +262,11 @@ async function handleAction(event) {
     return;
   }
 
+  if (action === "pronunciation") {
+    togglePronunciationAssessment();
+    return;
+  }
+
   if (action === "summary") {
     await generateSummary();
     return;
@@ -282,6 +294,9 @@ function resetSession(shouldRender) {
   state.coachNote = "";
   state.summary = null;
   state.transcript = "";
+  state.pronunciationMode = false;
+  state.pronunciationTarget = "";
+  state.pronunciationResult = null;
   state.status = "ready";
   stopVoiceInput();
   window.speechSynthesis?.cancel();
@@ -289,6 +304,10 @@ function resetSession(shouldRender) {
 }
 
 async function sendUtterance() {
+  if (state.pronunciationMode) {
+    completePronunciationAssessment();
+    return;
+  }
   const usedVoice = state.usedVoiceForTurn;
   const voiceConfidence = state.voiceConfidence;
   stopVoiceInput();
@@ -375,6 +394,10 @@ async function generateSummary() {
 
 function toggleVoiceInput() {
   if (state.voiceIntent) {
+    if (state.pronunciationMode) {
+      completePronunciationAssessment();
+      return;
+    }
     stopVoiceInput();
     render();
     return;
@@ -405,10 +428,67 @@ function toggleVoiceInput() {
 
   state.voiceIntent = true;
   state.voiceStatus = "starting";
+  state.pronunciationMode = false;
   state.usedVoiceForTurn = true;
   state.voiceConfidence = null;
   state.finalTranscript = state.transcript.trim();
   startRecognition(SpeechRecognition);
+  render();
+}
+
+function togglePronunciationAssessment() {
+  if (state.pronunciationMode) {
+    completePronunciationAssessment();
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    state.pronunciationResult = {
+      score: 0,
+      match: 0,
+      confidence: 0,
+      spoken: "",
+      advice: "当前浏览器不支持语音识别，建议使用 Chrome 或 Edge。",
+    };
+    render();
+    return;
+  }
+
+  const target = getLatestAssistantText();
+  if (!target) {
+    state.pronunciationResult = {
+      score: 0,
+      match: 0,
+      confidence: 0,
+      spoken: "",
+      advice: "请先开始一轮对话，让 AI 给出一句可跟读的目标句。",
+    };
+    render();
+    return;
+  }
+
+  stopVoiceInput();
+  state.pronunciationMode = true;
+  state.pronunciationTarget = target;
+  state.pronunciationResult = null;
+  state.transcript = "";
+  state.finalTranscript = "";
+  state.voiceConfidence = null;
+  state.usedVoiceForTurn = false;
+  state.voiceIntent = true;
+  state.voiceStatus = "starting";
+  startRecognition(SpeechRecognition);
+  render();
+}
+
+function completePronunciationAssessment() {
+  const spoken = state.transcript.trim();
+  const target = state.pronunciationTarget;
+  const confidence = state.voiceConfidence ?? 0;
+  stopVoiceInput();
+  state.pronunciationMode = false;
+  state.pronunciationResult = evaluatePronunciation(target, spoken, confidence);
   render();
 }
 
@@ -502,12 +582,73 @@ function stopVoiceInput() {
 }
 
 function getVoiceStatusText() {
+  if (state.pronunciationMode && state.voiceStatus === "listening") {
+    return "跟读评测中：请朗读目标句，读完点击完成评测。";
+  }
   if (state.voiceStatus === "starting") return "正在启动麦克风，允许权限后即可连续说话。";
   if (state.voiceStatus === "listening") return "正在监听，可连续说英语；点击停止识别结束。";
   if (state.voiceStatus === "restarting") return "短暂停顿中，系统正在自动续听。";
   if (state.voiceStatus === "blocked") return "麦克风权限未开启，可改用文本输入。";
   if (state.voiceStatus === "error") return "语音识别启动失败，可刷新页面或使用文本输入。";
   return "可点击连续语音输入；Chrome 或 Edge 效果最好。";
+}
+
+function getLatestAssistantText() {
+  const latest = [...state.history].reverse().find((message) => message.role === "assistant");
+  return latest?.text || scenarios[state.scenario].starter;
+}
+
+function evaluatePronunciation(target, spoken, confidence) {
+  if (!spoken) {
+    return {
+      score: 0,
+      match: 0,
+      confidence: 0,
+      spoken: "",
+      advice: "没有识别到朗读内容，请靠近麦克风并放慢语速再试一次。",
+    };
+  }
+
+  const targetWords = normalizeWords(target);
+  const spokenWords = normalizeWords(spoken);
+  const distance = levenshteinDistance(targetWords, spokenWords);
+  const maxLength = Math.max(targetWords.length, spokenWords.length, 1);
+  const match = Math.max(0, 1 - distance / maxLength);
+  const safeConfidence = Math.max(0, Math.min(1, Number(confidence) || 0.65));
+  const score = Math.round(match * 65 + safeConfidence * 35);
+  return {
+    score,
+    match: Math.round(match * 100),
+    confidence: Math.round(safeConfidence * 100),
+    spoken,
+    advice:
+      score >= 82
+        ? "跟读内容和目标句匹配度较高，发音清晰度较好。"
+        : score >= 65
+          ? "整体可识别，但建议放慢语速，重点读清关键词。"
+          : "识别文本和目标句差异较大，建议分短句跟读并保持稳定音量。",
+  };
+}
+
+function normalizeWords(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function levenshteinDistance(left, right) {
+  const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
+  for (let i = 0; i <= left.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= right.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[left.length][right.length];
 }
 
 function speak(text) {
@@ -548,7 +689,7 @@ function renderFeedback(feedback, coachNote = "") {
       ${renderScore("流利", feedback.fluency)}
       ${renderScore("准确", feedback.accuracy)}
       ${renderScore("词汇", feedback.vocabulary)}
-      ${renderScore("发音", feedback.pronunciation)}
+      ${feedback.pronunciation ? renderScore("发音", feedback.pronunciation) : ""}
     </div>
     <div class="coach-note">${escapeHtml(feedback.praise || "")}</div>
     ${coachNote ? `<div class="system-note">${escapeHtml(formatCoachNote(coachNote))}</div>` : ""}
@@ -572,6 +713,32 @@ function renderFeedback(feedback, coachNote = "") {
     <div class="better">
       <span>更自然表达</span>
       <p>${escapeHtml(feedback.betterExpression || "")}</p>
+    </div>
+  `;
+}
+
+function renderPronunciationPanel() {
+  if (!state.pronunciationTarget && !state.pronunciationResult) return "";
+  const result = state.pronunciationResult;
+  return `
+    <div class="pronunciation-panel">
+      <div>
+        <span>跟读目标</span>
+        <p>${escapeHtml(state.pronunciationTarget || getLatestAssistantText())}</p>
+      </div>
+      ${
+        result
+          ? `<div class="pronunciation-result">
+              <strong>${result.score}<small>/100</small></strong>
+              <p>${escapeHtml(result.advice)}</p>
+              <dl>
+                <dt>文本匹配</dt><dd>${result.match}%</dd>
+                <dt>识别置信度</dt><dd>${result.confidence}%</dd>
+              </dl>
+              <em>识别结果：${escapeHtml(result.spoken || "未识别到内容")}</em>
+            </div>`
+          : `<small>点击「完成评测」后，系统会比较目标句和识别文本，给出跟读准确度。</small>`
+      }
     </div>
   `;
 }

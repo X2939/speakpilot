@@ -303,7 +303,10 @@ def normalize_turn(
             "fluency": clamp_score(feedback.get("fluency"), fallback["feedback"]["fluency"]),
             "accuracy": clamp_score(feedback.get("accuracy"), fallback["feedback"]["accuracy"]),
             "vocabulary": clamp_score(feedback.get("vocabulary"), fallback["feedback"]["vocabulary"]),
-            "pronunciation": clamp_score(feedback.get("pronunciation"), fallback["feedback"]["pronunciation"]),
+            "pronunciation": normalize_optional_score(
+                feedback.get("pronunciation"),
+                fallback["feedback"]["pronunciation"],
+            ),
             "issues": normalize_issues(feedback.get("issues"), fallback["feedback"]["issues"]),
             "betterExpression": safe_string(
                 feedback.get("betterExpression"),
@@ -409,7 +412,7 @@ def build_ability_profile(feedbacks: list[dict[str, Any]], fallback_score: int) 
     vocabulary = average_metric(feedbacks, "vocabulary", fallback_score)
     pronunciation = average_metric(feedbacks, "pronunciation", fallback_score)
     completion = min(95, max(58, fallback_score + min(8, len(feedbacks) * 2)))
-    return [
+    profile = [
         {
             "label": "流利度",
             "score": fluency,
@@ -426,16 +429,21 @@ def build_ability_profile(feedbacks: list[dict[str, Any]], fallback_score: int) 
             "comment": "词汇能覆盖当前场景。" if vocabulary >= 75 else "建议积累场景高频表达和替代表达。",
         },
         {
-            "label": "发音清晰度",
-            "score": pronunciation,
-            "comment": "语音识别稳定，发音清晰度较好。" if pronunciation >= 75 else "建议放慢语速，保证关键词发音清楚。",
-        },
-        {
             "label": "场景完成度",
             "score": completion,
             "comment": "能够跟随角色追问继续推进任务。" if completion >= 75 else "需要更明确地回应场景任务目标。",
         },
     ]
+    if has_metric(feedbacks, "pronunciation"):
+        profile.insert(
+            3,
+            {
+                "label": "发音清晰度",
+                "score": pronunciation,
+                "comment": "语音识别稳定，发音清晰度较好。" if pronunciation >= 75 else "建议放慢语速，保证关键词发音清楚。",
+            },
+        )
+    return profile
 
 
 def build_error_stats(feedbacks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -487,6 +495,10 @@ def build_drills(feedbacks: list[dict[str, Any]], scenario: dict[str, str]) -> l
 def average_metric(feedbacks: list[dict[str, Any]], key: str, fallback: int) -> int:
     values = [float(item[key]) for item in feedbacks if is_number(item.get(key))]
     return round(sum(values) / len(values)) if values else fallback
+
+
+def has_metric(feedbacks: list[dict[str, Any]], key: str) -> bool:
+    return any(is_number(item.get(key)) for item in feedbacks)
 
 
 def make_feedback(text: str, voice_confidence: float | None = None, used_voice: bool = False) -> dict[str, Any]:
@@ -585,9 +597,9 @@ def make_feedback(text: str, voice_confidence: float | None = None, used_voice: 
     }
 
 
-def estimate_pronunciation_score(text: str, voice_confidence: float | None, used_voice: bool) -> int:
+def estimate_pronunciation_score(text: str, voice_confidence: float | None, used_voice: bool) -> int | None:
     if not used_voice:
-        return 76
+        return None
     confidence = voice_confidence if is_number(voice_confidence) else 0.72
     score = round(55 + max(0.0, min(1.0, float(confidence))) * 40)
     word_count = len([word for word in text.split() if word])
@@ -681,7 +693,18 @@ def normalize_dict_list(value: Any, fallback: list[dict[str, Any]]) -> list[dict
 def clamp_score(value: Any, fallback: int) -> int:
     if not is_number(value):
         return fallback
-    return max(0, min(100, round(float(value))))
+    number = float(value)
+    if 0 < number <= 10:
+        number *= 10
+    return max(0, min(100, round(number)))
+
+
+def normalize_optional_score(value: Any, fallback: Any) -> int | None:
+    if value is None and fallback is None:
+        return None
+    if not is_number(value):
+        return fallback if fallback is None else clamp_score(fallback, 0)
+    return clamp_score(value, 0)
 
 
 def is_number(value: Any) -> bool:
