@@ -51,6 +51,7 @@ const state = {
   recognition: null,
   recognizing: false,
   voiceIntent: false,
+  voiceStatus: "idle",
   finalTranscript: "",
   speaking: true,
 };
@@ -163,6 +164,10 @@ function render() {
               <textarea id="utterance" placeholder="也可以直接输入英文，例如：I am agree with this plan because it is efficient.">${escapeHtml(
                 state.transcript,
               )}</textarea>
+              <div class="voice-status ${state.voiceIntent ? "active" : ""}">
+                <span class="voice-dot ${state.recognizing ? "listening" : ""}"></span>
+                <span>${escapeHtml(getVoiceStatusText())}</span>
+              </div>
               <div class="composer-actions">
                 <button class="mic ${state.voiceIntent ? "recording" : ""}" data-action="voice">
                   ${state.voiceIntent ? "停止识别" : "连续语音输入"}
@@ -393,8 +398,10 @@ function toggleVoiceInput() {
   }
 
   state.voiceIntent = true;
+  state.voiceStatus = "starting";
   state.finalTranscript = state.transcript.trim();
   startRecognition(SpeechRecognition);
+  render();
 }
 
 function startRecognition(SpeechRecognition) {
@@ -407,6 +414,7 @@ function startRecognition(SpeechRecognition) {
 
   recognition.onstart = () => {
     state.recognizing = true;
+    state.voiceStatus = "listening";
     render();
   };
   recognition.onresult = (event) => {
@@ -428,6 +436,7 @@ function startRecognition(SpeechRecognition) {
   recognition.onerror = (event) => {
     if (event.error === "not-allowed" || event.error === "service-not-allowed") {
       state.voiceIntent = false;
+      state.voiceStatus = "blocked";
       state.coachNote = "麦克风权限未开启，已切换为文本输入。";
       state.recognizing = false;
       render();
@@ -435,16 +444,20 @@ function startRecognition(SpeechRecognition) {
     }
     if (event.error === "no-speech") {
       state.recognizing = false;
+      state.voiceStatus = "restarting";
       return;
     }
     state.coachNote = "语音识别暂时中断，系统会自动尝试继续监听。";
     state.recognizing = false;
+    state.voiceStatus = "restarting";
     render();
   };
   recognition.onend = () => {
     state.recognizing = false;
     state.recognition = null;
     if (state.voiceIntent) {
+      state.voiceStatus = "restarting";
+      render();
       window.setTimeout(() => startRecognition(SpeechRecognition), 250);
     } else {
       render();
@@ -457,6 +470,7 @@ function startRecognition(SpeechRecognition) {
   } catch {
     state.voiceIntent = false;
     state.recognizing = false;
+    state.voiceStatus = "error";
     state.coachNote = "语音识别启动失败，请刷新页面或改用文本输入。";
     render();
   }
@@ -469,7 +483,17 @@ function stopVoiceInput() {
     state.recognition = null;
   }
   state.recognizing = false;
+  state.voiceStatus = "idle";
   state.finalTranscript = state.transcript.trim();
+}
+
+function getVoiceStatusText() {
+  if (state.voiceStatus === "starting") return "正在启动麦克风，允许权限后即可连续说话。";
+  if (state.voiceStatus === "listening") return "正在监听，可连续说英语；点击停止识别结束。";
+  if (state.voiceStatus === "restarting") return "短暂停顿中，系统正在自动续听。";
+  if (state.voiceStatus === "blocked") return "麦克风权限未开启，可改用文本输入。";
+  if (state.voiceStatus === "error") return "语音识别启动失败，可刷新页面或使用文本输入。";
+  return "可点击连续语音输入；Chrome 或 Edge 效果最好。";
 }
 
 function speak(text) {
