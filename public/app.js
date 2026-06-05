@@ -50,6 +50,8 @@ const state = {
   aiEnabled: false,
   recognition: null,
   recognizing: false,
+  voiceIntent: false,
+  finalTranscript: "",
   speaking: true,
 };
 
@@ -162,8 +164,8 @@ function render() {
                 state.transcript,
               )}</textarea>
               <div class="composer-actions">
-                <button class="mic ${state.recognizing ? "recording" : ""}" data-action="voice">
-                  ${state.recognizing ? "停止识别" : "语音输入"}
+                <button class="mic ${state.voiceIntent ? "recording" : ""}" data-action="voice">
+                  ${state.voiceIntent ? "停止识别" : "连续语音输入"}
                 </button>
                 <button class="primary" data-action="send" ${state.status === "thinking" ? "disabled" : ""}>
                   ${state.status === "thinking" ? "AI 思考中" : "发送"}
@@ -199,6 +201,7 @@ function bindEvents() {
   const textarea = document.querySelector("#utterance");
   textarea?.addEventListener("input", (event) => {
     state.transcript = event.target.value;
+    state.finalTranscript = state.transcript.trim();
   });
 }
 
@@ -279,6 +282,7 @@ function resetSession(shouldRender) {
 }
 
 async function sendUtterance() {
+  stopVoiceInput();
   const textarea = document.querySelector("#utterance");
   const message = (textarea?.value || state.transcript || "").trim();
   if (!message || state.status === "thinking") return;
@@ -359,7 +363,7 @@ async function generateSummary() {
 }
 
 function toggleVoiceInput() {
-  if (state.recognizing) {
+  if (state.voiceIntent) {
     stopVoiceInput();
     render();
     return;
@@ -383,46 +387,89 @@ function toggleVoiceInput() {
       betterExpression: "文本输入模式同样可以完成比赛演示。",
       praise: "已自动提供备用输入方式。",
     };
+    state.coachNote = "当前浏览器不支持连续语音识别，建议使用 Chrome 或 Edge。";
     render();
     return;
   }
 
+  state.voiceIntent = true;
+  state.finalTranscript = state.transcript.trim();
+  startRecognition(SpeechRecognition);
+}
+
+function startRecognition(SpeechRecognition) {
+  if (!state.voiceIntent) return;
+
   const recognition = new SpeechRecognition();
   recognition.lang = "en-US";
   recognition.interimResults = true;
-  recognition.continuous = false;
+  recognition.continuous = true;
 
   recognition.onstart = () => {
     state.recognizing = true;
     render();
   };
   recognition.onresult = (event) => {
-    const transcript = Array.from(event.results)
-      .map((result) => result[0].transcript)
-      .join(" ");
-    state.transcript = transcript;
+    let interimTranscript = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      const text = result[0].transcript.trim();
+      if (!text) continue;
+      if (result.isFinal) {
+        state.finalTranscript = [state.finalTranscript, text].filter(Boolean).join(" ");
+      } else {
+        interimTranscript = [interimTranscript, text].filter(Boolean).join(" ");
+      }
+    }
+    state.transcript = [state.finalTranscript, interimTranscript].filter(Boolean).join(" ");
     const textarea = document.querySelector("#utterance");
-    if (textarea) textarea.value = transcript;
+    if (textarea) textarea.value = state.transcript;
   };
-  recognition.onerror = () => {
+  recognition.onerror = (event) => {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      state.voiceIntent = false;
+      state.coachNote = "麦克风权限未开启，已切换为文本输入。";
+      state.recognizing = false;
+      render();
+      return;
+    }
+    if (event.error === "no-speech") {
+      state.recognizing = false;
+      return;
+    }
+    state.coachNote = "语音识别暂时中断，系统会自动尝试继续监听。";
     state.recognizing = false;
     render();
   };
   recognition.onend = () => {
     state.recognizing = false;
-    render();
+    state.recognition = null;
+    if (state.voiceIntent) {
+      window.setTimeout(() => startRecognition(SpeechRecognition), 250);
+    } else {
+      render();
+    }
   };
 
   state.recognition = recognition;
-  recognition.start();
+  try {
+    recognition.start();
+  } catch {
+    state.voiceIntent = false;
+    state.recognizing = false;
+    state.coachNote = "语音识别启动失败，请刷新页面或改用文本输入。";
+    render();
+  }
 }
 
 function stopVoiceInput() {
+  state.voiceIntent = false;
   if (state.recognition) {
     state.recognition.stop();
     state.recognition = null;
   }
   state.recognizing = false;
+  state.finalTranscript = state.transcript.trim();
 }
 
 function speak(text) {

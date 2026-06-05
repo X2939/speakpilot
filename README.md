@@ -16,7 +16,7 @@ Demo 视频链接：待上传后填写
 
 - 场景选择：面试、点餐、会议、旅行、校园交流
 - 难度选择：初级、中级、高级
-- 语音输入：基于浏览器 Web Speech API，Chrome/Edge 效果最好
+- 连续语音输入：基于浏览器 Web Speech API，支持持续监听和自动续听，Chrome/Edge 效果最好
 - 文本备用输入：麦克风不可用时仍可完整演示
 - AI 主动开场：进入场景后自动发起第一句真实对话
 - AI 角色回复：后端支持 OpenAI 兼容接口
@@ -89,7 +89,7 @@ OPENAI_MODEL=gpt-4.1-mini
 
 1. 选择「面试」场景和「中级」难度。
 2. 打开页面后，AI 面试官会自动发起第一句场景问题。
-3. 点击「语音输入」说一句英文，或直接输入：
+3. 点击「连续语音输入」说一句英文，或直接输入：
 
    ```text
    I am agree with this plan because it can help me learn fast.
