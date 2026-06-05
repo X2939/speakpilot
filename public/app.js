@@ -59,7 +59,7 @@ init();
 
 async function init() {
   await checkHealth();
-  render();
+  startSession({ shouldSpeak: false });
 }
 
 async function checkHealth() {
@@ -133,7 +133,7 @@ function render() {
           <div class="topbar-actions">
             <button class="ghost" data-action="toggle-speech">${state.speaking ? "关闭朗读" : "开启朗读"}</button>
             <button class="ghost" data-action="reset">重置</button>
-            <button class="primary" data-action="start">开始练习</button>
+            <button class="primary" data-action="start">${state.history.length ? "重新开始" : "开始练习"}</button>
           </div>
         </header>
 
@@ -151,8 +151,8 @@ function render() {
                 state.history.length
                   ? state.history.map(renderMessage).join("")
                   : `<div class="empty-state">
-                      <h3>选择场景后点击开始练习</h3>
-                      <p>建议先用 3 到 5 轮短对话完成演示，再生成课后总结。</p>
+                      <h3>AI 正在准备场景开场</h3>
+                      <p>建议用 3 到 5 轮短对话完成演示，再生成课后总结。</p>
                     </div>`
               }
             </div>
@@ -215,8 +215,7 @@ async function handleAction(event) {
 
   if (action === "scenario") {
     state.scenario = value;
-    resetSession(false);
-    render();
+    startSession({ shouldSpeak: true });
     return;
   }
 
@@ -232,7 +231,7 @@ async function handleAction(event) {
   }
 
   if (action === "reset") {
-    resetSession(true);
+    startSession({ shouldSpeak: false });
     return;
   }
 
@@ -258,12 +257,12 @@ async function handleAction(event) {
   }
 }
 
-function startSession() {
+function startSession({ shouldSpeak = true } = {}) {
   resetSession(false);
   const starter = scenarios[state.scenario].starter;
   state.history.push({ role: "assistant", text: starter, time: nowTime() });
   render();
-  speak(starter);
+  if (shouldSpeak) speak(starter);
 }
 
 function resetSession(shouldRender) {
