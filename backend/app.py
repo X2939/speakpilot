@@ -87,17 +87,17 @@ app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(ROOT_DIR / "index.html")
+    return no_store_file(ROOT_DIR / "index.html")
 
 
 @app.get("/app.js")
 async def app_js() -> FileResponse:
-    return FileResponse(PUBLIC_DIR / "app.js")
+    return no_store_file(PUBLIC_DIR / "app.js")
 
 
 @app.get("/styles.css")
 async def styles_css() -> FileResponse:
-    return FileResponse(PUBLIC_DIR / "styles.css")
+    return no_store_file(PUBLIC_DIR / "styles.css")
 
 
 @app.get("/api/health")
@@ -232,10 +232,21 @@ async def static_fallback(path: str):
     candidate = ROOT_DIR / path
     public_candidate = PUBLIC_DIR / path
     if candidate.exists() and candidate.is_file():
-        return FileResponse(candidate)
+        return no_store_file(candidate)
     if public_candidate.exists() and public_candidate.is_file():
-        return FileResponse(public_candidate)
+        return no_store_file(public_candidate)
     return PlainTextResponse("Not found", status_code=404)
+
+
+def no_store_file(path: Path) -> FileResponse:
+    return FileResponse(
+        path,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 async def call_chat_model(messages: list[dict[str, str]], temperature: float) -> dict[str, Any]:
