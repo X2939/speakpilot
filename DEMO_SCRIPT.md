@@ -59,7 +59,7 @@ yes,but i dont want to slefintroduce
 - `i dont` -> `I don't`
 - `slefintroduce` -> `introduce myself`
 - `yes,but` -> `yes, but`
-- 总分、流利度、准确性、词汇评分
+- 总分、流利度、准确性、词汇、发音清晰度评分
 
 ### 4. 展示稳定反馈模式
 
@@ -102,7 +102,7 @@ I want to go to Beijing next week, but I need help with the hotel.
 
 展示重点：
 
-- 能力画像：流利度、准确性、词汇、场景完成度
+- 能力画像：流利度、准确性、词汇、发音清晰度、场景完成度
 - 错误统计：grammar、expression、fluency 等
 - 复练任务：下一次具体练什么
 

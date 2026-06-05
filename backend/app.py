@@ -72,6 +72,8 @@ class TurnRequest(BaseModel):
     scenario: str = "interview"
     level: str = "intermediate"
     message: str
+    usedVoice: bool = False
+    voiceConfidence: float | None = None
     history: list[ConversationMessage] = Field(default_factory=list)
 
 
@@ -118,12 +120,12 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
     if not user_text:
         return {
             "reply": "Please say one sentence in English so we can keep practicing.",
-            "feedback": make_feedback(user_text),
+            "feedback": make_feedback(user_text, payload.voiceConfidence, payload.usedVoice),
             "coachNote": "等待用户输入。",
         }
 
     if not os.getenv("OPENAI_API_KEY"):
-        return create_mock_turn(user_text, scenario, payload.level)
+        return create_mock_turn(user_text, scenario, payload.level, payload.voiceConfidence, payload.usedVoice)
 
     messages = [
         {
@@ -132,7 +134,7 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
                 "You are SpeakPilot, an English speaking coach. Return strict JSON only. "
                 'The JSON shape is {"reply":"short in-role English response",'
                 '"feedback":{"score":number,"fluency":number,"accuracy":number,'
-                '"vocabulary":number,"issues":[{"type":"grammar|expression|vocabulary|pronunciation",'
+                '"vocabulary":number,"pronunciation":number,"issues":[{"type":"grammar|expression|vocabulary|pronunciation",'
                 '"original":"...","suggestion":"...","reason":"Chinese explanation"}],'
                 '"betterExpression":"...","praise":"Chinese short praise"},"coachNote":"Chinese teaching note"}. '
                 "Keep reply under 45 words. Correct only the most useful issues. "
@@ -149,6 +151,8 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
                     "learnerLevel": payload.level,
                     "conversation": [item.model_dump() for item in payload.history[-8:]],
                     "learnerUtterance": user_text,
+                    "usedVoice": payload.usedVoice,
+                    "voiceConfidence": payload.voiceConfidence,
                 },
                 ensure_ascii=False,
             ),
@@ -157,9 +161,9 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
 
     try:
         ai_result = await call_chat_model(messages, temperature=0.35)
-        return normalize_turn(ai_result, user_text, scenario)
+        return normalize_turn(ai_result, user_text, scenario, payload.voiceConfidence, payload.usedVoice)
     except Exception as exc:
-        fallback = create_mock_turn(user_text, scenario, payload.level)
+        fallback = create_mock_turn(user_text, scenario, payload.level, payload.voiceConfidence, payload.usedVoice)
         fallback["coachNote"] = f"稳定反馈模式已接管：{format_error(exc)}"
         return fallback
 
@@ -283,8 +287,14 @@ async def call_chat_model(messages: list[dict[str, str]], temperature: float) ->
     return parse_json_object(content)
 
 
-def normalize_turn(ai: dict[str, Any], user_text: str, scenario: dict[str, str]) -> dict[str, Any]:
-    fallback = create_mock_turn(user_text, scenario, "intermediate")
+def normalize_turn(
+    ai: dict[str, Any],
+    user_text: str,
+    scenario: dict[str, str],
+    voice_confidence: float | None = None,
+    used_voice: bool = False,
+) -> dict[str, Any]:
+    fallback = create_mock_turn(user_text, scenario, "intermediate", voice_confidence, used_voice)
     feedback = ai.get("feedback") if isinstance(ai.get("feedback"), dict) else {}
     return {
         "reply": safe_string(ai.get("reply"), fallback["reply"]),
@@ -293,6 +303,7 @@ def normalize_turn(ai: dict[str, Any], user_text: str, scenario: dict[str, str])
             "fluency": clamp_score(feedback.get("fluency"), fallback["feedback"]["fluency"]),
             "accuracy": clamp_score(feedback.get("accuracy"), fallback["feedback"]["accuracy"]),
             "vocabulary": clamp_score(feedback.get("vocabulary"), fallback["feedback"]["vocabulary"]),
+            "pronunciation": clamp_score(feedback.get("pronunciation"), fallback["feedback"]["pronunciation"]),
             "issues": normalize_issues(feedback.get("issues"), fallback["feedback"]["issues"]),
             "betterExpression": safe_string(
                 feedback.get("betterExpression"),
@@ -319,8 +330,14 @@ def normalize_summary(ai: dict[str, Any], feedbacks: list[dict[str, Any]]) -> di
     }
 
 
-def create_mock_turn(user_text: str, scenario: dict[str, str], level: str) -> dict[str, Any]:
-    feedback = make_feedback(user_text)
+def create_mock_turn(
+    user_text: str,
+    scenario: dict[str, str],
+    level: str,
+    voice_confidence: float | None = None,
+    used_voice: bool = False,
+) -> dict[str, Any]:
+    feedback = make_feedback(user_text, voice_confidence, used_voice)
     reply = build_fallback_reply(user_text, scenario)
     level_hint = {
         "beginner": "Use one or two simple sentences.",
@@ -390,6 +407,7 @@ def build_ability_profile(feedbacks: list[dict[str, Any]], fallback_score: int) 
     fluency = average_metric(feedbacks, "fluency", fallback_score)
     accuracy = average_metric(feedbacks, "accuracy", fallback_score)
     vocabulary = average_metric(feedbacks, "vocabulary", fallback_score)
+    pronunciation = average_metric(feedbacks, "pronunciation", fallback_score)
     completion = min(95, max(58, fallback_score + min(8, len(feedbacks) * 2)))
     return [
         {
@@ -406,6 +424,11 @@ def build_ability_profile(feedbacks: list[dict[str, Any]], fallback_score: int) 
             "label": "词汇",
             "score": vocabulary,
             "comment": "词汇能覆盖当前场景。" if vocabulary >= 75 else "建议积累场景高频表达和替代表达。",
+        },
+        {
+            "label": "发音清晰度",
+            "score": pronunciation,
+            "comment": "语音识别稳定，发音清晰度较好。" if pronunciation >= 75 else "建议放慢语速，保证关键词发音清楚。",
         },
         {
             "label": "场景完成度",
@@ -466,7 +489,7 @@ def average_metric(feedbacks: list[dict[str, Any]], key: str, fallback: int) -> 
     return round(sum(values) / len(values)) if values else fallback
 
 
-def make_feedback(text: str) -> dict[str, Any]:
+def make_feedback(text: str, voice_confidence: float | None = None, used_voice: bool = False) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     lower = text.lower()
 
@@ -545,11 +568,13 @@ def make_feedback(text: str) -> dict[str, Any]:
 
     score = max(58, 88 - len(issues) * 8 + min(8, len(text) // 28))
     grammar_count = len([issue for issue in issues if issue["type"] == "grammar"])
+    pronunciation = estimate_pronunciation_score(text, voice_confidence, used_voice)
     return {
         "score": score,
         "fluency": max(55, score - (8 if len(text) < 35 else 0)),
         "accuracy": max(55, score - grammar_count * 6),
         "vocabulary": max(58, score - 3),
+        "pronunciation": pronunciation,
         "issues": issues[:3],
         "betterExpression": (
             "A clearer version: " + improve_sentence(text)
@@ -558,6 +583,19 @@ def make_feedback(text: str) -> dict[str, Any]:
         ),
         "praise": "方向是对的，重点改掉这一个表达会更自然。" if issues else "这句话比较清楚，可以继续保持。",
     }
+
+
+def estimate_pronunciation_score(text: str, voice_confidence: float | None, used_voice: bool) -> int:
+    if not used_voice:
+        return 76
+    confidence = voice_confidence if is_number(voice_confidence) else 0.72
+    score = round(55 + max(0.0, min(1.0, float(confidence))) * 40)
+    word_count = len([word for word in text.split() if word])
+    if word_count < 4:
+        score -= 8
+    if re.search(r"\b(um+|uh+|er+)\b", text.lower()):
+        score -= 5
+    return max(45, min(98, score))
 
 
 def improve_sentence(text: str) -> str:

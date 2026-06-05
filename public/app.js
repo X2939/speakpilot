@@ -52,6 +52,8 @@ const state = {
   recognizing: false,
   voiceIntent: false,
   voiceStatus: "idle",
+  usedVoiceForTurn: false,
+  voiceConfidence: null,
   finalTranscript: "",
   speaking: true,
 };
@@ -287,6 +289,8 @@ function resetSession(shouldRender) {
 }
 
 async function sendUtterance() {
+  const usedVoice = state.usedVoiceForTurn;
+  const voiceConfidence = state.voiceConfidence;
   stopVoiceInput();
   const textarea = document.querySelector("#utterance");
   const message = (textarea?.value || state.transcript || "").trim();
@@ -305,6 +309,8 @@ async function sendUtterance() {
         scenario: state.scenario,
         level: state.level,
         message,
+        usedVoice,
+        voiceConfidence,
         history: state.history,
       }),
     });
@@ -399,6 +405,8 @@ function toggleVoiceInput() {
 
   state.voiceIntent = true;
   state.voiceStatus = "starting";
+  state.usedVoiceForTurn = true;
+  state.voiceConfidence = null;
   state.finalTranscript = state.transcript.trim();
   startRecognition(SpeechRecognition);
   render();
@@ -423,6 +431,12 @@ function startRecognition(SpeechRecognition) {
       const result = event.results[index];
       const text = result[0].transcript.trim();
       if (!text) continue;
+      if (Number.isFinite(result[0].confidence) && result[0].confidence > 0) {
+        state.voiceConfidence =
+          state.voiceConfidence === null
+            ? result[0].confidence
+            : (state.voiceConfidence + result[0].confidence) / 2;
+      }
       if (result.isFinal) {
         state.finalTranscript = [state.finalTranscript, text].filter(Boolean).join(" ");
       } else {
@@ -534,6 +548,7 @@ function renderFeedback(feedback, coachNote = "") {
       ${renderScore("流利", feedback.fluency)}
       ${renderScore("准确", feedback.accuracy)}
       ${renderScore("词汇", feedback.vocabulary)}
+      ${renderScore("发音", feedback.pronunciation)}
     </div>
     <div class="coach-note">${escapeHtml(feedback.praise || "")}</div>
     ${coachNote ? `<div class="system-note">${escapeHtml(formatCoachNote(coachNote))}</div>` : ""}
