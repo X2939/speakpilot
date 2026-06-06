@@ -372,6 +372,8 @@ def build_fallback_reply(user_text: str, scenario: dict[str, str]) -> str:
         return "I need a little more information. Could you answer with a full sentence?"
 
     if role == "interviewer":
+        if is_overlong_answer(user_text):
+            return "Your background is detailed and relevant. Now please choose one project and explain your specific responsibility and result."
         if any(word in lower for word in ["introduce", "selfintroduce", "slefintroduce"]):
             return "No problem. Instead of a long self-introduction, could you share one strength and one example?"
         if any(word in lower for word in ["project", "study", "work", "internship"]):
@@ -424,14 +426,14 @@ def is_unclear_input(text: str) -> bool:
         return True
     if re.search(r"([a-zA-Z]{2,})\1{3,}", compact):
         return True
-    long_words = [word for word in words if len(word) >= 14]
-    if long_words and not any(word in long_words[0] for word in ["introduction", "responsibility"]):
+    long_words = [word for word in words if len(word) >= 24]
+    if long_words:
         return True
-    if len(compact) >= 18:
-        unique_ratio = len(set(compact)) / len(compact)
-        if unique_ratio < 0.28:
-            return True
     return False
+
+
+def is_overlong_answer(text: str) -> bool:
+    return len([word for word in re.findall(r"[a-zA-Z']+", text)]) >= 65
 
 
 def create_mock_summary(
@@ -640,6 +642,15 @@ def make_feedback(text: str, voice_confidence: float | None = None, used_voice: 
                 "reason": "拒绝回答时也要给出替代方向，这样对话才能继续推进。",
             }
         )
+    if is_overlong_answer(text):
+        issues.append(
+            {
+                "type": "expression",
+                "original": "long self-introduction",
+                "suggestion": "Make it shorter and focus on education, key skills, one project, and career goal.",
+                "reason": "内容完整，但面试开场回答偏长。建议控制在 45-60 秒，并突出和岗位最相关的信息。",
+            }
+        )
     if len([word for word in text.split() if word]) < 5:
         issues.append(
             {
@@ -691,6 +702,13 @@ def improve_sentence(text: str) -> str:
         return "I'm a student, and one strength is that I learn quickly."
     if is_refusal(text):
         return "I prefer to talk about my project because it shows my skills."
+    if is_overlong_answer(text):
+        return (
+            "Good morning. My name is XXX. I hold a bachelor's degree in Physics from Xinjiang University "
+            "and am now pursuing Software Engineering at East China Normal University. I have built skills "
+            "in Python, algorithms, data structures, RAG, and vLLM, and my math competition experience strengthened "
+            "my logical thinking. I hope to grow in AI backend development and keep improving my engineering skills."
+        )
     replacements = [
         (r"\bI am agree\b", "I agree"),
         (r"\bi dont\b", "I don't"),
