@@ -232,6 +232,9 @@ function bindEvents() {
   textarea?.addEventListener("input", (event) => {
     state.transcript = event.target.value;
     state.finalTranscript = state.transcript.trim();
+    if (!state.voiceIntent && !state.pronunciationMode) {
+      clearVoiceTurnState();
+    }
   });
 }
 
@@ -328,6 +331,7 @@ function resetSession(shouldRender) {
   state.pronunciationResult = null;
   state.status = "ready";
   stopVoiceInput();
+  clearVoiceTurnState();
   window.speechSynthesis?.cancel();
   if (shouldRender) render();
 }
@@ -373,10 +377,12 @@ async function sendUtterance() {
     state.coachNote = data.coachNote || "";
     state.feedbacks.push(data.feedback);
     state.status = "ready";
+    clearVoiceTurnState();
     render();
     speak(data.reply);
   } catch (error) {
     state.status = "ready";
+    clearVoiceTurnState();
     state.latestFeedback = {
       score: 0,
       fluency: 0,
@@ -694,9 +700,14 @@ function stopVoiceInput() {
   state.finalTranscript = state.transcript.trim();
 }
 
+function clearVoiceTurnState() {
+  state.usedVoiceForTurn = false;
+  state.voiceConfidence = null;
+}
+
 function getVoiceStatusText() {
   if (state.pronunciationMode && state.voiceStatus === "listening") {
-    return "跟读评测中：请朗读目标句，读完点击完成评测。";
+    return "表达复练中：请朗读复练目标，读完点击完成复练。";
   }
   if (state.voiceStatus === "starting") return "正在启动麦克风，允许权限后即可连续说话。";
   if (state.voiceStatus === "listening") return "正在监听，可连续说英语；点击停止识别结束。";
