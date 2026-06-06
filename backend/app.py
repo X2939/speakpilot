@@ -139,7 +139,10 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
                 '"betterExpression":"...","praise":"Chinese short praise"},"coachNote":"Chinese teaching note"}. '
                 "Keep reply under 45 words. Correct only the most useful issues. "
                 "Only include a pronunciation score when usedVoice is true; otherwise set pronunciation to null. "
-                "Do not switch the role-play to Chinese."
+                "Do not switch the role-play to Chinese. "
+                "The reply must move the conversation forward with one clear next-step question or task. "
+                "For job interviews, do not only praise; guide the learner to answer with a concrete frame "
+                "such as context, responsibility, action, and result."
             ),
         },
         {
@@ -297,8 +300,9 @@ def normalize_turn(
 ) -> dict[str, Any]:
     fallback = create_mock_turn(user_text, scenario, "intermediate", voice_confidence, used_voice)
     feedback = ai.get("feedback") if isinstance(ai.get("feedback"), dict) else {}
+    reply = ensure_guided_reply(safe_string(ai.get("reply"), fallback["reply"]), user_text, scenario)
     return {
-        "reply": safe_string(ai.get("reply"), fallback["reply"]),
+        "reply": reply,
         "feedback": {
             "score": clamp_score(feedback.get("score"), fallback["feedback"]["score"]),
             "fluency": clamp_score(feedback.get("fluency"), fallback["feedback"]["fluency"]),
@@ -316,7 +320,7 @@ def normalize_turn(
             ),
             "praise": safe_string(feedback.get("praise"), fallback["feedback"]["praise"]),
         },
-        "coachNote": safe_string(ai.get("coachNote"), fallback["coachNote"]),
+        "coachNote": safe_string(ai.get("coachNote"), "真实 AI 已给出本轮反馈。"),
     }
 
 
@@ -373,7 +377,7 @@ def build_fallback_reply(user_text: str, scenario: dict[str, str]) -> str:
 
     if role == "interviewer":
         if is_overlong_answer(user_text):
-            return "Your background is detailed and relevant. Now please choose one project and explain your specific responsibility and result."
+            return build_project_guidance_reply()
         if any(word in lower for word in ["introduce", "selfintroduce", "slefintroduce"]):
             return "No problem. Instead of a long self-introduction, could you share one strength and one example?"
         if any(word in lower for word in ["project", "study", "work", "internship"]):
@@ -396,11 +400,71 @@ def build_fallback_reply(user_text: str, scenario: dict[str, str]) -> str:
     return "Thanks. Please add one more detail so we can continue the conversation."
 
 
+def ensure_guided_reply(reply: str, user_text: str, scenario: dict[str, str]) -> str:
+    cleaned = clean_reply_text(reply)
+    role = scenario["role"]
+    if role != "interviewer":
+        return cleaned
+
+    lower_text = user_text.lower()
+    is_intro_answer = is_overlong_answer(user_text) or any(
+        word in lower_text for word in ["university", "major", "degree"]
+    )
+    lower_reply = cleaned.lower()
+    has_project_frame = "responsibility" in lower_reply and "result" in lower_reply
+    if is_intro_answer and not has_project_frame:
+        return build_project_guidance_reply()
+
+    lower_reply = cleaned.lower()
+    has_question = "?" in cleaned
+    has_task = bool(
+        re.search(
+            r"\b(could you|can you|please|tell me|explain|choose|try to|use this|next|what|why|how)\b",
+            lower_reply,
+        )
+    )
+    if has_question or has_task:
+        return cleaned
+
+    if is_intro_answer:
+        return build_project_guidance_reply()
+    if any(word in lower_text for word in ["project", "rag", "vllm", "backend", "python"]):
+        return (
+            "Good. Let's make it interview-ready. What was your responsibility, which technology did you use, "
+            "and what result did you achieve?"
+        )
+    if any(word in lower_text for word in ["strength", "advantage", "good at", "skill"]):
+        return "Good. Now support that strength with evidence. Can you give one project example where it helped you?"
+    return "Good. Let's continue with one concrete example. What happened, what did you do, and what was the result?"
+
+
+def build_project_guidance_reply() -> str:
+    return (
+        "Your introduction is detailed and confident. Next, choose one project and use this frame: "
+        "context, your responsibility, two actions, and the result. Which project would you like to talk about?"
+    )
+
+
+def clean_reply_text(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    replacements = [
+        (r"\bsharea\b", "share a"),
+        (r"\banswerwith\b", "answer with"),
+        (r"\bintroductionis\b", "introduction is"),
+        (r"\bresponseis\b", "response is"),
+    ]
+    for pattern, replacement in replacements:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 def build_level_hint(user_text: str, level: str) -> str:
     if is_unclear_input(user_text):
         return "Use this pattern: 'I'm a student, and one strength is ...'."
     if len([word for word in user_text.split() if word]) < 5 or is_refusal(user_text):
         return "You can use: 'I think ... because ...' or 'One example is ...'."
+    if is_overlong_answer(user_text):
+        return "You can start with: 'One project I worked on was ..., and my main responsibility was ...'."
     if level == "beginner":
         return "Use one or two simple sentences."
     if level == "advanced":
