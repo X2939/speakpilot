@@ -31,10 +31,19 @@ const scenarios = {
   },
 };
 
-const levels = {
-  beginner: "初级",
-  intermediate: "中级",
-  advanced: "高级",
+const practiceStyles = {
+  beginner: {
+    label: "强提示",
+    hint: "给句式，适合开口",
+  },
+  intermediate: {
+    label: "标准",
+    hint: "追问加少量提示",
+  },
+  advanced: {
+    label: "少提示",
+    hint: "更像真实对话",
+  },
 };
 
 const HISTORY_STORAGE_KEY = "speakpilot.practiceHistory.v1";
@@ -118,12 +127,15 @@ function render() {
         </section>
 
         <section class="panel">
-          <div class="panel-title">难度</div>
-          <div class="segmented">
-            ${Object.entries(levels)
+          <div class="panel-title">练习风格</div>
+          <div class="style-grid">
+            ${Object.entries(practiceStyles)
               .map(
-                ([key, label]) => `
-                  <button class="${state.level === key ? "active" : ""}" data-action="level" data-value="${key}">${label}</button>
+                ([key, item]) => `
+                  <button class="style-choice ${state.level === key ? "active" : ""}" data-action="level" data-value="${key}">
+                    <span>${item.label}</span>
+                    <small>${item.hint}</small>
+                  </button>
                 `,
               )
               .join("")}
@@ -440,7 +452,7 @@ function loadHistoryEntry(id) {
   stopVoiceInput();
   window.speechSynthesis?.cancel();
   state.scenario = entry.scenario in scenarios ? entry.scenario : "interview";
-  state.level = entry.level in levels ? entry.level : "intermediate";
+  state.level = entry.level in practiceStyles ? entry.level : "intermediate";
   state.sessionId = entry.id;
   state.sessionStartedAt = entry.createdAt || new Date().toISOString();
   state.activeHistoryId = entry.id;
@@ -477,7 +489,7 @@ function saveCurrentSessionSummary() {
     scenario: state.scenario,
     scenarioLabel: scenario.label,
     level: state.level,
-    levelLabel: levels[state.level],
+    levelLabel: practiceStyles[state.level]?.label || "标准",
     createdAt,
     savedAt,
     messageCount: state.history.length,
@@ -1076,7 +1088,7 @@ function formatHistoryMeta(entry) {
     date && !Number.isNaN(date.getTime())
       ? date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
       : "刚刚";
-  const level = entry.levelLabel || levels[entry.level] || "中级";
+  const level = practiceStyles[entry.level]?.label || entry.levelLabel || "标准";
   const turns = Number(entry.userTurns) || 0;
   return `${dateText} · ${level} · ${turns} 轮`;
 }

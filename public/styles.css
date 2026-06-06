@@ -24,6 +24,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow: hidden;
   color: var(--ink);
   background:
     linear-gradient(180deg, rgba(8, 127, 140, 0.06), rgba(216, 95, 69, 0.04)),
@@ -48,13 +49,31 @@ button:disabled {
 .shell {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
 }
 
 .sidebar {
+  height: 100vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   border-right: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.82);
   padding: 24px;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: rgba(219, 226, 234, 0.45);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(219, 226, 234, 0.45);
+  border-radius: 999px;
+  background: rgba(96, 112, 128, 0.45);
 }
 
 .brand {
@@ -176,6 +195,37 @@ button:disabled {
   color: var(--ink);
   background: #ffffff;
   box-shadow: 0 3px 12px rgba(25, 39, 52, 0.08);
+}
+
+.style-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.style-choice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.style-choice span {
+  font-weight: 900;
+}
+
+.style-choice small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.style-choice.active {
+  border-color: rgba(8, 127, 140, 0.55);
+  background: rgba(8, 127, 140, 0.08);
 }
 
 .compact {
@@ -314,6 +364,8 @@ button:disabled {
 }
 
 .workspace {
+  height: 100vh;
+  overflow: hidden;
   min-width: 0;
   padding: 24px;
 }
@@ -606,10 +658,12 @@ textarea:focus {
 
 .coach {
   display: grid;
-  max-height: calc(100vh - 132px);
+  height: calc(100vh - 132px);
+  min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
   gap: 18px;
+  padding-right: 4px;
 }
 
 .coach::-webkit-scrollbar {
@@ -982,14 +1036,27 @@ textarea:focus {
 }
 
 @media (max-width: 1120px) {
+  body {
+    overflow: auto;
+  }
+
   .shell,
   .main-grid {
     grid-template-columns: 1fr;
   }
 
+  .shell,
+  .sidebar,
+  .workspace {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
   .coach {
-    max-height: none;
+    height: auto;
     overflow-y: visible;
+    padding-right: 0;
   }
 
   .sidebar {
