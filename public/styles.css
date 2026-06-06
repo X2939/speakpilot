@@ -645,6 +645,66 @@ textarea:focus {
   gap: 8px;
 }
 
+.voice-assessment {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid rgba(8, 127, 140, 0.24);
+  border-radius: 8px;
+  background: rgba(8, 127, 140, 0.06);
+  padding: 12px;
+}
+
+.voice-assessment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.voice-assessment-head span {
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.voice-assessment-head strong {
+  color: var(--teal);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.voice-assessment-head small {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.voice-assessment dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+  color: #405365;
+  font-size: 13px;
+}
+
+.voice-assessment dt {
+  font-weight: 900;
+}
+
+.voice-assessment dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.voice-assessment p {
+  margin: 0;
+  color: #244f56;
+  line-height: 1.45;
+}
+
 .pronunciation-panel {
   display: grid;
   gap: 8px;

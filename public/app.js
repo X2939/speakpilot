@@ -195,7 +195,7 @@ function render() {
                   ${state.voiceIntent ? "停止识别" : "连续语音输入"}
                 </button>
                 <button class="secondary" data-action="pronunciation">
-                  ${state.pronunciationMode ? "完成评测" : "跟读评测"}
+                  ${state.pronunciationMode ? "完成复练" : "表达复练"}
                 </button>
                 <button class="primary" data-action="send" ${state.status === "thinking" ? "disabled" : ""}>
                   ${state.status === "thinking" ? "AI 思考中" : "发送"}
@@ -365,6 +365,9 @@ async function sendUtterance() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "AI request failed");
 
+    if (usedVoice && data.feedback) {
+      data.feedback.pronunciationDetail = buildVoiceAssessment(message, voiceConfidence, data.feedback.pronunciation);
+    }
     state.history.push({ role: "assistant", text: data.reply, time: nowTime() });
     state.latestFeedback = data.feedback;
     state.coachNote = data.coachNote || "";
@@ -565,14 +568,14 @@ function togglePronunciationAssessment() {
     return;
   }
 
-  const target = getLatestAssistantText();
+  const target = getPracticeTarget();
   if (!target) {
     state.pronunciationResult = {
       score: 0,
       match: 0,
       confidence: 0,
       spoken: "",
-      advice: "请先开始一轮对话，让 AI 给出一句可跟读的目标句。",
+      advice: "请先用语音完成一轮回答，系统会基于本轮更自然表达生成复练目标。",
     };
     render();
     return;
@@ -708,6 +711,40 @@ function getLatestAssistantText() {
   return latest?.text || scenarios[state.scenario].starter;
 }
 
+function getLatestUserText() {
+  const latest = [...state.history].reverse().find((message) => message.role === "user");
+  return latest?.text || "";
+}
+
+function getPracticeTarget() {
+  const betterExpression = cleanBetterExpression(state.latestFeedback?.betterExpression || "");
+  if (betterExpression && !betterExpression.includes("This sentence works")) return betterExpression;
+  return getLatestUserText();
+}
+
+function cleanBetterExpression(text) {
+  return String(text || "")
+    .replace(/^A clearer version:\s*/i, "")
+    .replace(/^更自然表达[:：]\s*/i, "")
+    .trim();
+}
+
+function buildVoiceAssessment(spoken, confidence, score) {
+  const safeConfidence = confidence === null || confidence === undefined ? 0.65 : Math.max(0, Math.min(1, Number(confidence) || 0));
+  const safeScore = Number(score) || Math.round(55 + safeConfidence * 40);
+  return {
+    spoken,
+    confidence: Math.round(safeConfidence * 100),
+    score: Math.max(0, Math.min(100, safeScore)),
+    advice:
+      safeScore >= 82
+        ? "本轮语音识别稳定，关键词发音清楚。"
+        : safeScore >= 68
+          ? "本轮语音基本可识别，建议放慢语速并读清重音词。"
+          : "本轮语音识别不够稳定，建议分短句回答并保持音量稳定。",
+  };
+}
+
 function evaluatePronunciation(target, spoken, confidence) {
   if (!spoken) {
     return {
@@ -832,6 +869,7 @@ function renderFeedback(feedback, coachNote = "") {
       ${renderScore("词汇", feedback.vocabulary)}
       ${feedback.pronunciation ? renderScore("发音", feedback.pronunciation) : ""}
     </div>
+    ${renderVoiceAssessment(feedback.pronunciationDetail)}
     <div class="coach-note">${escapeHtml(feedback.praise || "")}</div>
     ${coachNote ? `<div class="system-note">${escapeHtml(formatCoachNote(coachNote))}</div>` : ""}
     <div class="issue-list">
@@ -858,14 +896,31 @@ function renderFeedback(feedback, coachNote = "") {
   `;
 }
 
+function renderVoiceAssessment(detail) {
+  if (!detail) return "";
+  return `
+    <div class="voice-assessment">
+      <div class="voice-assessment-head">
+        <span>本轮语音发音评估</span>
+        <strong>${Number(detail.score) || 0}<small>/100</small></strong>
+      </div>
+      <dl>
+        <dt>识别置信度</dt><dd>${Number(detail.confidence) || 0}%</dd>
+        <dt>语音识别结果</dt><dd>${escapeHtml(detail.spoken || "未识别到内容")}</dd>
+      </dl>
+      <p>${escapeHtml(detail.advice || "")}</p>
+    </div>
+  `;
+}
+
 function renderPronunciationPanel() {
   if (!state.pronunciationTarget && !state.pronunciationResult) return "";
   const result = state.pronunciationResult;
   return `
     <div class="pronunciation-panel">
       <div>
-        <span>跟读目标</span>
-        <p>${escapeHtml(state.pronunciationTarget || getLatestAssistantText())}</p>
+        <span>复练目标</span>
+        <p>${escapeHtml(state.pronunciationTarget || getPracticeTarget())}</p>
       </div>
       ${
         result
@@ -878,7 +933,7 @@ function renderPronunciationPanel() {
               </dl>
               <em>识别结果：${escapeHtml(result.spoken || "未识别到内容")}</em>
             </div>`
-          : `<small>点击「完成评测」后，系统会比较目标句和识别文本，给出跟读准确度。</small>`
+          : `<small>点击「完成复练」后，系统会比较复练目标和识别文本，给出跟读准确度。</small>`
       }
     </div>
   `;

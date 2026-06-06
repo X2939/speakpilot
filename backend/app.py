@@ -138,6 +138,7 @@ async def create_turn(payload: TurnRequest) -> dict[str, Any]:
                 '"original":"...","suggestion":"...","reason":"Chinese explanation"}],'
                 '"betterExpression":"...","praise":"Chinese short praise"},"coachNote":"Chinese teaching note"}. '
                 "Keep reply under 45 words. Correct only the most useful issues. "
+                "Only include a pronunciation score when usedVoice is true; otherwise set pronunciation to null. "
                 "Do not switch the role-play to Chinese."
             ),
         },
@@ -303,9 +304,10 @@ def normalize_turn(
             "fluency": clamp_score(feedback.get("fluency"), fallback["feedback"]["fluency"]),
             "accuracy": clamp_score(feedback.get("accuracy"), fallback["feedback"]["accuracy"]),
             "vocabulary": clamp_score(feedback.get("vocabulary"), fallback["feedback"]["vocabulary"]),
-            "pronunciation": normalize_optional_score(
-                feedback.get("pronunciation"),
-                fallback["feedback"]["pronunciation"],
+            "pronunciation": (
+                normalize_optional_score(feedback.get("pronunciation"), fallback["feedback"]["pronunciation"])
+                if used_voice
+                else None
             ),
             "issues": normalize_issues(feedback.get("issues"), fallback["feedback"]["issues"]),
             "betterExpression": safe_string(
