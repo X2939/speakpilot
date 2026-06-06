@@ -37,11 +37,18 @@ const levels = {
   advanced: "高级",
 };
 
+const HISTORY_STORAGE_KEY = "speakpilot.practiceHistory.v1";
+const HISTORY_LIMIT = 20;
+
 const state = {
   scenario: "interview",
   level: "intermediate",
+  sessionId: createId(),
+  sessionStartedAt: new Date().toISOString(),
   status: "ready",
   history: [],
+  practiceHistory: [],
+  activeHistoryId: "",
   feedbacks: [],
   latestFeedback: null,
   coachNote: "",
@@ -66,6 +73,7 @@ const app = document.querySelector("#app");
 init();
 
 async function init() {
+  state.practiceHistory = loadPracticeHistory();
   await checkHealth();
   startSession({ shouldSpeak: false });
 }
@@ -128,6 +136,14 @@ function render() {
             <span class="dot ${state.aiEnabled ? "online" : "offline"}"></span>
             ${state.aiEnabled ? "真实 AI 模型已连接" : "本地兜底模式，可完整演示"}
           </div>
+        </section>
+
+        <section class="panel history-panel">
+          <div class="panel-title row-title">
+            <span>练习历史</span>
+            <small>${state.practiceHistory.length}/${HISTORY_LIMIT}</small>
+          </div>
+          ${renderPracticeHistory()}
         </section>
       </aside>
 
@@ -272,6 +288,16 @@ async function handleAction(event) {
     return;
   }
 
+  if (action === "history-load") {
+    loadHistoryEntry(value);
+    return;
+  }
+
+  if (action === "history-delete") {
+    deleteHistoryEntry(value);
+    return;
+  }
+
   if (action === "toggle-speech") {
     state.speaking = !state.speaking;
     window.speechSynthesis?.cancel();
@@ -281,6 +307,9 @@ async function handleAction(event) {
 
 function startSession({ shouldSpeak = true } = {}) {
   resetSession(false);
+  state.sessionId = createId();
+  state.sessionStartedAt = new Date().toISOString();
+  state.activeHistoryId = "";
   const starter = scenarios[state.scenario].starter;
   state.history.push({ role: "assistant", text: starter, time: nowTime() });
   render();
@@ -388,7 +417,88 @@ async function generateSummary() {
     };
   } finally {
     state.status = "ready";
+    if (state.summary?.overallScore && state.history.length >= 2) {
+      saveCurrentSessionSummary();
+    }
     render();
+  }
+}
+
+function loadHistoryEntry(id) {
+  const entry = state.practiceHistory.find((item) => item.id === id);
+  if (!entry) return;
+
+  stopVoiceInput();
+  window.speechSynthesis?.cancel();
+  state.scenario = entry.scenario in scenarios ? entry.scenario : "interview";
+  state.level = entry.level in levels ? entry.level : "intermediate";
+  state.sessionId = entry.id;
+  state.sessionStartedAt = entry.createdAt || new Date().toISOString();
+  state.activeHistoryId = entry.id;
+  state.history = Array.isArray(entry.history) ? entry.history : [];
+  state.feedbacks = Array.isArray(entry.feedbacks) ? entry.feedbacks : [];
+  state.latestFeedback = state.feedbacks.at(-1) || null;
+  state.coachNote = "已打开历史练习摘要，可继续查看总结或点击重新开始进入新一轮。";
+  state.summary = entry.summary || null;
+  state.transcript = "";
+  state.status = "ready";
+  state.pronunciationMode = false;
+  state.pronunciationTarget = "";
+  state.pronunciationResult = null;
+  render();
+}
+
+function deleteHistoryEntry(id) {
+  state.practiceHistory = state.practiceHistory.filter((item) => item.id !== id);
+  savePracticeHistory(state.practiceHistory);
+  if (state.activeHistoryId === id) {
+    state.activeHistoryId = "";
+  }
+  render();
+}
+
+function saveCurrentSessionSummary() {
+  const scenario = scenarios[state.scenario];
+  const createdAt = state.sessionStartedAt || new Date().toISOString();
+  const savedAt = new Date().toISOString();
+  const userTurns = state.history.filter((message) => message.role === "user").length;
+  const existing = state.practiceHistory.filter((item) => item.id !== state.sessionId);
+  const entry = {
+    id: state.sessionId,
+    scenario: state.scenario,
+    scenarioLabel: scenario.label,
+    level: state.level,
+    levelLabel: levels[state.level],
+    createdAt,
+    savedAt,
+    messageCount: state.history.length,
+    userTurns,
+    overallScore: Number(state.summary.overallScore) || 0,
+    summaryText: state.summary.summary || "",
+    history: state.history,
+    feedbacks: state.feedbacks,
+    summary: state.summary,
+  };
+  state.practiceHistory = [entry, ...existing].slice(0, HISTORY_LIMIT);
+  state.activeHistoryId = entry.id;
+  savePracticeHistory(state.practiceHistory);
+}
+
+function loadPracticeHistory() {
+  try {
+    const raw = window.localStorage?.getItem(HISTORY_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePracticeHistory(items) {
+  try {
+    window.localStorage?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
+  } catch {
+    state.coachNote = "浏览器本地存储不可用，历史摘要未保存。";
   }
 }
 
@@ -673,6 +783,37 @@ function renderMessage(message) {
   `;
 }
 
+function renderPracticeHistory() {
+  if (!state.practiceHistory.length) {
+    return `
+      <div class="history-empty">
+        <strong>暂无历史</strong>
+        <p>生成课后总结后，会自动保存最近 ${HISTORY_LIMIT} 次练习摘要。</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="history-list">
+      ${state.practiceHistory
+        .map(
+          (entry) => `
+            <div class="history-item ${state.activeHistoryId === entry.id ? "active" : ""}">
+              <button class="history-main" data-action="history-load" data-value="${escapeHtml(entry.id)}">
+                <span>${escapeHtml(entry.scenarioLabel || "练习")}</span>
+                <strong>${Number(entry.overallScore) || 0}</strong>
+                <small>${escapeHtml(formatHistoryMeta(entry))}</small>
+                <p>${escapeHtml(entry.summaryText || "已保存本轮练习摘要。")}</p>
+              </button>
+              <button class="history-delete" title="删除这条历史" data-action="history-delete" data-value="${escapeHtml(entry.id)}">删除</button>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderFeedback(feedback, coachNote = "") {
   if (!feedback) {
     return `
@@ -856,6 +997,22 @@ function renderDrills(items = []) {
 
 function nowTime() {
   return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function createId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatHistoryMeta(entry) {
+  const date = entry.savedAt ? new Date(entry.savedAt) : null;
+  const dateText =
+    date && !Number.isNaN(date.getTime())
+      ? date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "刚刚";
+  const level = entry.levelLabel || levels[entry.level] || "中级";
+  const turns = Number(entry.userTurns) || 0;
+  return `${dateText} · ${level} · ${turns} 轮`;
 }
 
 function escapeHtml(value) {
